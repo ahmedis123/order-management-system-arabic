@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>نظام إدارة الطلبات</title>
+  <style>
+    :root {
+      --primary: #4a90e2; --success: #27ae60; --danger: #e74c3c;
+      --bg: #f5f7fa; --card: #fff; --text: #333;
+      --radius:8px; --gap:16px; --maxW:900px;
+    }
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text);padding:var(--gap);display:flex;justify-content:center;}
+    .container{width:100%;max-width:var(--maxW);display:grid;gap:var(--gap);}
+    header{background:var(--primary);color:#fff;padding:var(--gap);text-align:center;border-radius:var(--radius);}
+    .card{background:var(--card);border-radius:var(--radius);padding:var(--gap);box-shadow:0 2px 8px rgba(0,0,0,0.1);}
+    form{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:var(--gap);}
+    form input, form button{padding:10px;font-size:1rem;border:1px solid #ccc;border-radius:var(--radius);}
+    form button{grid-column:1/-1;background:var(--primary);color:#fff;border:none;cursor:pointer;}
+    form button:hover{background:#3b7dc4;}
+    .controls{display:flex;flex-wrap:wrap;gap:var(--gap);align-items:center;}
+    .controls input[type=search]{flex:1;padding:10px;border:1px solid #ccc;border-radius:var(--radius);}
+    .actions{display:flex;gap:var(--gap);}
+    .actions button, .actions label{padding:10px 16px;border:none;border-radius:var(--radius);cursor:pointer;color:#fff;}
+    .actions .export{background:var(--success);} .actions .export:hover{background:#1f8f47;}
+    .file-label{background:var(--primary);position:relative;display:inline-block;}
+    .file-label input{position:absolute;top:0;left:0;width:100%;height:100%;opacity:0;cursor:pointer;}
+    .table-wrapper{overflow-x:auto;}
+    table{width:100%;border-collapse:collapse;margin-top:var(--gap);}
+    th,td{padding:10px;border:1px solid #eee;text-align:center;}
+    th{background:var(--primary);color:#fff;cursor:pointer;}
+    tr.editing td{background:#ffffe0;}
+    .btn{padding:6px 10px;border:none;border-radius:var(--radius);cursor:pointer;color:#fff;}
+    .btn-delete{background:var(--danger);} .btn-delete:hover{background:#c0392b;}
+    .btn-edit{background:#f39c12;} .btn-edit:hover{background:#d68910;}
+    #toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--primary);color:#fff;padding:10px 20px;border-radius:var(--radius);opacity:0;transition:opacity .3s;}
+    #toast.show{opacity:1;}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header><h1>نظام إدارة الطلبات</h1></header>
+
+    <div class="card">
+      <h2>إضافة طلب جديد</h2>
+      <form id="orderForm">
+        <input type="text" id="customer" placeholder="اسم العميل" required />
+        <input type="number" id="quantity" placeholder="الكمية" required min="1" />
+        <input type="number" id="price" placeholder="السعر (SDG)" step="0.01" required min="0.01" />
+        <input type="date" id="date" required />
+        <button type="submit">حفظ الطلب</button>
+      </form>
+    </div>
+
+    <div class="card controls">
+      <input type="search" id="search" placeholder="ابحث باسم العميل..." />
+      <div class="actions">
+        <button class="export" id="exportCsv">تحميل CSV</button>
+        <label class="file-label">استيراد CSV<input type="file" id="importCsv" accept=".csv"/></label>
+      </div>
+    </div>
+
+    <div class="card table-wrapper">
+      <table id="orderTable">
+        <thead>
+          <tr>
+            <th data-key="customer">العميل</th>
+            <th data-key="quantity">الكمية</th>
+            <th data-key="price">السعر</th>
+            <th data-key="total">الإجمالي</th>
+            <th data-key="date">التاريخ</th>
+            <th>إجراءات</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+  <div id="toast"></div>
+
+  <script>
+    const form = document.getElementById('orderForm'),
+          tbody = document.querySelector('#orderTable tbody'),
+          exportBtn = document.getElementById('exportCsv'),
+          importInp = document.getElementById('importCsv'),
+          searchInp = document.getElementById('search'),
+          toastEl = document.getElementById('toast'),
+          headers = document.querySelectorAll('#orderTable th[data-key]');
+
+    let orders = JSON.parse(localStorage.getItem('orders')||'[]'),
+        sortKey = null, sortAsc = true;
+
+    function showToast(msg){
+      toastEl.textContent = msg; toastEl.classList.add('show');
+      setTimeout(()=>toastEl.classList.remove('show'),2000);
+    }
+
+    function save(){ localStorage.setItem('orders', JSON.stringify(orders)); }
+
+    function render(){
+      const filter = searchInp.value.trim().toLowerCase();
+      const data = orders
+        .filter(o=>o.customer.toLowerCase().includes(filter))
+        .sort((a,b)=>{
+          if(!sortKey) return 0;
+          let v1=a[sortKey], v2=b[sortKey];
+          if(typeof v1==='string') v1=v1.toLowerCase(),v2=v2.toLowerCase();
+          return (v1>v2?1:-1)*(sortAsc?1:-1);
+        });
+
+      tbody.innerHTML='';
+      const frag=document.createDocumentFragment();
+      data.forEach((o,i)=>{
+        const tr=document.createElement('tr');
+        tr.innerHTML=`
+          <td>${o.customer}</td>
+          <td>${o.quantity}</td>
+          <td>${o.price.toFixed(2)} SDG</td>
+          <td>${o.total.toFixed(2)} SDG</td>
+          <td>${o.date}</td>
+          <td>
+            <button class="btn btn-edit" data-i="${i}">تعديل</button>
+            <button class="btn btn-delete" data-i="${i}">حذف</button>
+          </td>`;
+        frag.appendChild(tr);
+      });
+      tbody.appendChild(frag);
+    }
+
+    tbody.addEventListener('click',e=>{
+      const btn=e.target;
+      if(btn.classList.contains('btn-delete')){
+        const i=btn.dataset.i;
+        if(confirm('حذف؟')){ orders.splice(i,1); save(); render(); showToast('تم الحذف'); }
+      }
+      if(btn.classList.contains('btn-edit')){
+        const i=btn.dataset.i, o=orders[i];
+        form.customer.value=o.customer; form.quantity.value=o.quantity;
+        form.price.value=o.price; form.date.value=o.date;
+        orders.splice(i,1); save(); render(); showToast('يمكنك التعديل ثم حفظ');
+      }
+    });
+
+    form.addEventListener('submit',e=>{
+      e.preventDefault();
+      const c=form.customer.value.trim(),q=+form.quantity.value,p=+form.price.value,d=form.date.value;
+      if(!c||q<=0||p<=0||!d){ showToast('بيانات غير صالحة'); return; }
+      orders.push({customer:c,quantity:q,price:p,total:q*p,date:d});
+      save(); render(); form.reset(); showToast('تم الحفظ');
+    });
+
+    exportBtn.addEventListener('click',()=>{
+      if(!orders.length){ showToast('لا توجد بيانات'); return; }
+      const hdr=['العميل','الكمية','السعر','الإجمالي','التاريخ'];
+      const rows=orders.map(o=>[o.customer,o.quantity,o.price,o.total,o.date]);
+      const csv=[hdr.join(','),...rows.map(r=>r.join(','))].join('\r\n');
+      const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+      const url=URL.createObjectURL(blob),a=document.createElement('a');
+      a.href=url;a.download='orders.csv';a.click();URL.revokeObjectURL(url);
+      showToast('تم تحميل CSV');
+    });
+
+    importInp.addEventListener('change',e=>{
+      const file=e.target.files[0]; if(!file) return;
+      const reader=new FileReader();
+      reader.onload=evt=>{
+        const lines=evt.target.result.trim().split(/\r?\n/), existing=new Set(orders.map(o=>[o.customer,o.quantity,o.price,o.total,o.date].join('|'))), imported=[];
+        lines.slice(1).forEach(line=>{
+          const p=line.split(',').map(s=>s.trim()); if(p.length<5) return;
+          const [c,qS,pS,tS,d]=p,q=+qS,pp=+pS,t=+tS;
+          if(!c||isNaN(q)||isNaN(pp)||isNaN(t)||!d) return;
+          const key=[c,q,pp,t,d].join('|'); if(existing.has(key)) return;
+          existing.add(key); imported.push({customer:c,quantity:q,price:pp,total:t,date:d});
+        });
+        if(!imported.length){ showToast('لا توجد بيانات جديدة'); return; }
+        orders=orders.concat(imported); save(); render(); showToast(`أضيف ${imported.length}`);
+      };
+      reader.readAsText(file,'UTF-8'); importInp.value='';
+    });
+
+    searchInp.addEventListener('input',render);
+
+    headers.forEach(th=>{
+      th.addEventListener('click',()=>{
+        const key=th.dataset.key;
+        if(sortKey===key) sortAsc=!sortAsc; else { sortKey=key; sortAsc=true; }
+        render();
+      });
+    });
+
+    render();
+  </script>
+</body>
+</html>
